@@ -16,7 +16,7 @@ stat_dir = os.getcwd() + '/statistics'
 ip_regex = r"\d{1,4}\.\d{1,3}\.\d{1,3}\.\d{1,3}"
 method_regex = r"\] \"(POST|GET|PUT|DELETE|HEAD)"
 time_regex = r"(\[.*\])"
-url_regex = r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+|\"-\""
+url_regex = r"(POST|GET|PUT|DELETE|HEAD) (.*) HTTP"
 duration_regex = r"(\d*)$"
 
 if not os.path.exists(stat_dir):
@@ -37,12 +37,11 @@ elif os.path.isdir(args.dir):
 methods_sum = {'GET': 0, 'POST': 0, "PUT": 0, 'DELETE': 0, 'HEAD': 0}
 
 
-def collect_statistics(logfile):
+def fields_stat(logfile):
     """
-    The function parses the file with regular expressions and counts the values of the fields
-    :param logfile: a log file is sent to the input
-    :return: returns a dictionary with the statistics of requests by the method and a list
-    of dictionaries with the duration of requests
+    The function counts the number of methods in the file and the number of requests with different durations.
+    :param logfile:
+    :return:
     """
     url_list = []
     for line in logfile:
@@ -51,43 +50,46 @@ def collect_statistics(logfile):
         time = re.search(time_regex, line)
         url = re.search(url_regex, line)
         duration = re.search(duration_regex, line)
+        if method is not None:
+            methods_sum[method.groups()[0]] += 1
         if (ip is not None) and (url is not None) and (time is not None) and (method is not None):
-            url_dict = {'URL': url.group(),
-                        'METHOD': method.groups()[0],
-                        'IP': ip.group(),
-                        'DATE': time.groups(),
-                        'TIME': int(duration.groups()[0])}
+            url_dict = {'ip': ip.group(),
+                        'date': time.groups()[0],
+                        'method': method.groups()[0],
+                        'url': url.groups()[1],
+                        'duration': int(duration.groups()[0])}
             url_list.append(url_dict.copy())
     return url_list
 
 
 for file in files:
     with open(file, 'r') as f:
-        url_list = collect_statistics(f)
+        result_stat = fields_stat(f)
+        f.seek(0)
+        count = len(f.readlines())
 
-    longest_request = sorted(url_list, key=lambda k: k['TIME'], reverse=True)
+    longest_request = sorted(result_stat, key=lambda k: k['duration'], reverse=True)
 
-    for elem in url_list:
-        methods_sum[elem['METHOD']] += 1
-    methods_sum['TOTAL'] = sum(methods_sum.values())
-    collect = Counter(k['IP'] for k in url_list)
-    # print(collect.most_common(3))
-
-    result_file = {'most_frequent': collect.most_common(3),
-                   'most_longest': longest_request[0:3],
-                   'requests_stat': methods_sum}
+    collect = Counter(k['ip'] for k in result_stat)
 
     file_name = os.path.basename(file)
     print(f"Statistics for file {file}:\n")
     print("Top 3 IP addresses from which requests were made:\n")
-    for el in collect.most_common(3):
-        print(f"For {el[0]} were made {el[1]} requests")
+    for elem in collect.most_common(3):
+        print(f"For {elem[0]} were made {elem[1]} requests")
     print("\nTop 3 the longest request:\n")
-    for el in longest_request[0:3]:
-        print(el['URL'] + ' with duration ' + str(el['TIME']) + 'ms')
+    for elem in longest_request[0:3]:
+        print(f"{json.dumps(elem, indent=4)}")
     print("\nStatistics for METHODS:\n")
     print(f"{json.dumps(methods_sum, indent=4)}")
+    print("\nTotal number of requests:")
+    print(count, end='\n')
     print("======================\n\n\n")
+
+    result_file = {'most_frequent': collect.most_common(3),
+                   'most_longest': longest_request[0:3],
+                   'requests_stat': methods_sum,
+                   'overall_requests': count}
 
     with open(stat_dir + '/' + f'stat_for_{file_name}.json', 'w') as f:
         f.write(json.dumps(result_file, indent=4))
